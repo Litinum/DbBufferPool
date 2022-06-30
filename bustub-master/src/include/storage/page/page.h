@@ -45,8 +45,21 @@ class Page {
   /** @return the pin count of this page */
   inline auto GetPinCount() -> int { return pin_count_; }
 
+  inline void SetPageId(page_id_t page_id) { page_id_ = page_id; }
+
+  inline void SetPinCount(int pin_count) { pin_count_ = pin_count;}
+
+  inline void ResetData() { ResetMemory(); }
+
+  inline void SetData(char *data) 
+  { 
+      memcpy(data_, data, PAGE_SIZE);
+  }
+
   /** @return true if the page in memory has been modified from the page on disk, false otherwise */
   inline auto IsDirty() -> bool { return is_dirty_; }
+
+  inline void SetDirty(bool is_dirty) { is_dirty_ = is_dirty; }
 
   /** Acquire the page write latch. */
   inline void WLatch() { rwlatch_.WLock(); }
