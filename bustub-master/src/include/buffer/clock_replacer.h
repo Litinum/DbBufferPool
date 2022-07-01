@@ -12,9 +12,8 @@
 
 #pragma once
 
-#include <list>
+#include <boost/dynamic_bitset.hpp>
 #include <mutex>  // NOLINT
-#include <vector>
 
 #include "buffer/replacer.h"
 #include "common/config.h"
@@ -46,7 +45,9 @@ class ClockReplacer : public Replacer {
   auto Size() -> size_t override;
 
  private:
-  // TODO(student): implement me!
+  frame_id_t current_frame = 0;
+  boost::dynamic_bitset<> resident;
+  boost::dynamic_bitset<> clock;
 };
 
 }  // namespace bustub
