@@ -11,12 +11,22 @@
 //===----------------------------------------------------------------------===//
 
 #include "buffer/parallel_buffer_pool_manager.h"
+#include "buffer/buffer_pool_manager_instance.h"
 
 namespace bustub {
 
 ParallelBufferPoolManager::ParallelBufferPoolManager(size_t num_instances, size_t pool_size, DiskManager *disk_manager,
                                                      LogManager *log_manager) {
   // Allocate and create individual BufferPoolManagerInstances
+
+  bpInstances = std::vector<BufferPoolManager*>(num_instances);
+  this->pool_size = pool_size * num_instances;
+
+  for (size_t i = 0; i < num_instances; i++)
+  {
+    bpInstances[i] = new BufferPoolManagerInstance(pool_size, num_instances, i, disk_manager, log_manager);
+  }
+  
 }
 
 // Update constructor to destruct all BufferPoolManagerInstances and deallocate any associated memory
@@ -24,7 +34,7 @@ ParallelBufferPoolManager::~ParallelBufferPoolManager() = default;
 
 auto ParallelBufferPoolManager::GetPoolSize() -> size_t {
   // Get size of all BufferPoolManagerInstances
-  return 0;
+  return pool_size;
 }
 
 auto ParallelBufferPoolManager::GetBufferPoolManager(page_id_t page_id) -> BufferPoolManager * {
