@@ -33,12 +33,11 @@ void LRUReplacer::Pin(frame_id_t frame_id) {
       return;
     }
   }
-  // TODO :: Not found
 }
 
 void LRUReplacer::Unpin(frame_id_t frame_id) {
   auto i = std::find(frames.begin(), frames.end(), frame_id);
-  if (i != frames.end()) frames.erase(i);
+  if (i != frames.end()) return;
   frames.push_back(frame_id);
 }
 

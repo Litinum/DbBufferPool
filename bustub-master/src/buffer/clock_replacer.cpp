@@ -28,6 +28,7 @@ auto ClockReplacer::Victim(frame_id_t *frame_id) -> bool {
       if (clock[current_frame])
         clock[current_frame] = 0;
       else {
+        resident[current_frame] = 0;
         *frame_id = current_frame;
         current_frame = (current_frame + 1) % clock.size();
         return true;
