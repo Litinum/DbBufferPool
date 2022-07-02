@@ -50,15 +50,16 @@ BufferPoolManagerInstance::~BufferPoolManagerInstance() {
 auto BufferPoolManagerInstance::FlushPgImp(page_id_t page_id) -> bool {
   // Make sure you call DiskManager::WritePage!
   for (Page *page = pages_; page < pages_ + pool_size_; page++) {
+    page->WLatch();
     if (page->GetPageId() == page_id) {
-      if (page->IsDirty() == false) return true;
-
-      page->WLatch();
-      disk_manager_->WritePage(page->GetPageId(), page->GetData());
+      if (page->IsDirty()) {
+        disk_manager_->WritePage(page->GetPageId(), page->GetData());
+        page->SetDirty(false);
+      }
       page->WUnlatch();
-
       return true;
     }
+    page->WUnlatch();
   }
 
   return false;
@@ -67,11 +68,12 @@ auto BufferPoolManagerInstance::FlushPgImp(page_id_t page_id) -> bool {
 void BufferPoolManagerInstance::FlushAllPgsImp() {
   // You can do it!
   for (Page *page = pages_; page < pages_ + pool_size_; page++) {
-    if (page->IsDirty() == true) {
-      page->WLatch();
+    page->WLatch();
+    if (page->IsDirty()) {
       disk_manager_->WritePage(page->GetPageId(), page->GetData());
-      page->WUnlatch();
+      page->SetDirty(false);
     }
+    page->WUnlatch();
   }
 }
 
@@ -85,6 +87,7 @@ auto BufferPoolManagerInstance::NewPgImp(page_id_t *page_id) -> Page * {
   frame_id_t id;
 
   latch_.lock();
+
   if (free_list_.size() > 0) {
     id = free_list_.front();
     free_list_.pop_front();
@@ -93,16 +96,15 @@ auto BufferPoolManagerInstance::NewPgImp(page_id_t *page_id) -> Page * {
       latch_.unlock();
       return nullptr;
     }
+    pages_[id].WLatch();
     if (pages_[id].IsDirty()) {
-      pages_[id].WLatch();
       disk_manager_->WritePage(pages_[id].GetPageId(), pages_[id].GetData());
-      pages_[id].WUnlatch();
+      pages_[id].SetDirty(false);
     }
+    pages_[id].WUnlatch();
   }
-  latch_.unlock();
-
-  latch_.lock();
   *page_id = AllocatePage();
+
   latch_.unlock();
 
   pages_[id].WLatch();
@@ -124,20 +126,20 @@ auto BufferPoolManagerInstance::FetchPgImp(page_id_t page_id) -> Page * {
   // 3.     Delete R from the page table and insert P.
   // 4.     Update P's metadata, read in the page content from disk, and then return a pointer to P.
 
-  latch_.lock();
-
   for (size_t i = 0; i < pool_size_; i++) {
+    pages_[i].WLatch();
     if (pages_[i].GetPageId() == page_id) {
       latch_.lock();
       replacer_->Pin(i);
-      pages_[i].SetPinCount(pages_[i].GetPinCount() + 1);
-
       latch_.unlock();
 
+      pages_[i].SetPinCount(pages_[i].GetPinCount() + 1);
+
+      pages_[i].WUnlatch();
       return &pages_[i];
     }
+    pages_[i].WUnlatch();
   }
-  latch_.unlock();
 
   frame_id_t id;
 
@@ -150,25 +152,24 @@ auto BufferPoolManagerInstance::FetchPgImp(page_id_t page_id) -> Page * {
       latch_.unlock();
       return nullptr;
     }
+    pages_[id].WLatch();
+    if (pages_[id].IsDirty()) {
+      disk_manager_->WritePage(pages_[id].GetPageId(), pages_[id].GetData());
+      pages_[id].SetDirty(true);
+    }
+    pages_[id].WUnlatch();
   }
   latch_.unlock();
 
-  if (pages_[id].IsDirty() == true) {
-    pages_[id].WLatch();
-    disk_manager_->WritePage(pages_[id].GetPageId(), pages_[id].GetData());
-    pages_[id].WUnlatch();
-  }
+  char *data = new char[PAGE_SIZE];
+  disk_manager_->ReadPage(page_id, data);
 
-  // DeletePgImp(pages_[id].GetPageId());
-  // DeallocatePage(pages_[id].GetPageId());
+  pages_[id].WLatch();
   pages_[id].SetPageId(page_id);
   pages_[id].SetPinCount(1);
   pages_[id].SetDirty(false);
-  char *data = new char[PAGE_SIZE];
-  pages_[id].RLatch();
-  disk_manager_->ReadPage(page_id, data);
-  pages_[id].RUnlatch();
   pages_[id].SetData(data);
+  pages_[id].WUnlatch();
 
   return &pages_[id];
 }
@@ -180,53 +181,56 @@ auto BufferPoolManagerInstance::DeletePgImp(page_id_t page_id) -> bool {
   // 2.   If P exists, but has a non-zero pin-count, return false. Someone is using the page.
   // 3.   Otherwise, P can be deleted. Remove P from the page table, reset its metadata and return it to the free list.
 
-  latch_.lock();
   for (size_t i = 0; i < pool_size_; i++) {
+    pages_[i].WLatch();
     if (pages_[i].GetPageId() == page_id) {
       if (pages_[i].GetPinCount() != 0) {
-        latch_.unlock();
-
+        pages_[i].WUnlatch();
         return false;
       }
 
-      else {
-        DeallocatePage(pages_[i].GetPageId());
-        pages_[i].SetPageId(INVALID_PAGE_ID);
-        pages_[i].SetPinCount(0);
-        pages_[i].SetDirty(false);
-        free_list_.push_front(i);
-      }
+      latch_.lock();
+      DeallocatePage(pages_[i].GetPageId());
+      free_list_.push_back(i);
+      latch_.unlock();
+
+      pages_[i].SetPageId(INVALID_PAGE_ID);
+      pages_[i].SetPinCount(0);
+      pages_[i].SetDirty(false);
+      pages_[i].ResetData();
+
+      pages_[i].WUnlatch();
+      return true;
     }
+    pages_[i].WUnlatch();
   }
-  latch_.unlock();
 
   return true;
 }
 
 auto BufferPoolManagerInstance::UnpinPgImp(page_id_t page_id, bool is_dirty) -> bool {
-  latch_.lock();
   for (size_t i = 0; i < pool_size_; i++) {
+    pages_[i].WLatch();
     if (pages_[i].GetPageId() == page_id) {
-      if (pages_[i].GetPinCount() == 0) {
-        latch_.unlock();
-
+      if (pages_[i].GetPinCount() <= 0) {
+        pages_[i].WUnlatch();
         return false;
       }
 
       pages_[i].SetPinCount(pages_[i].GetPinCount() - 1);
+      if (is_dirty) pages_[i].SetDirty(true);
 
       if (pages_[i].GetPinCount() == 0) {
+        latch_.lock();
         replacer_->Unpin(i);
+        latch_.unlock();
       }
 
-      if (is_dirty == true) pages_[i].SetDirty(true);
-
-      latch_.unlock();
-
+      pages_[i].WUnlatch();
       return true;
     }
+    pages_[i].WUnlatch();
   }
-  latch_.unlock();
 
   return false;
 }

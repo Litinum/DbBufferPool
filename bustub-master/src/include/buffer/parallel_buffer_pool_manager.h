@@ -87,9 +87,9 @@ class ParallelBufferPoolManager : public BufferPoolManager {
    */
   void FlushAllPgsImp() override;
 
-  private:
-    std::vector<BufferPoolManager*> bpInstances;
-    size_t pool_size;
-    size_t starting_index = 0;
+ private:
+  std::vector<BufferPoolManager *> bpInstances;
+  size_t pool_size;
+  size_t starting_index = 0;
 };
 }  // namespace bustub
